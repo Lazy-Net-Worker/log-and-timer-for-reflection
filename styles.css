@@ -1,8 +1,10 @@
-/*
+.ltfr-message {
+	color: var(--text-warning);
+	font-size: var(--font-size-small);
+	margin-top: 12px;
+	text-align: center;
+}
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
-
-If your plugin does not need CSS, delete this file.
-
-*/
+.ltfr-message.is-hidden {
+	display: none;
+}
