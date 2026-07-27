@@ -37,7 +37,6 @@ export function createEmptyPluginData(): PluginData {
 			exportSummaryTemplate: '## Summary\n{{SUMMARY}}',
 			exportLogItemTemplate: '- {{START}} - {{END}} | {{TASK}} | {{DURATION}} | {{MEMO}}',
 			exportBodyTemplate: '{{SUMMARY}}\n\n{{LOGS}}',
-			dailyNotePathTemplate: '{{YYYY}}-{{MM}}-{{DD}}.md',
 			showReflectionInputOnSave: true,
 			appendToDailyNote: false,
 			inversePomodoroBreakRatio: 0.2,

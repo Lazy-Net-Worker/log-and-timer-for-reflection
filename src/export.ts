@@ -40,7 +40,7 @@ export function resolveExportRange(settings: PluginSettings, referenceDate = new
 		const parsed = value ? new Date(value) : null;
 		return parsed && !Number.isNaN(parsed.getTime()) ? startOfDay(parsed) : null;
 	};
-	const rangeType = settings.exportRangeType as ExportRangeType;
+	const rangeType = settings.exportRangeType;
 
 	if (rangeType === 'date-range') {
 		const from = parseDate(settings.exportRangeFrom) ?? startOfDay(now);

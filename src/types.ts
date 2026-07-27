@@ -57,7 +57,6 @@ export interface PluginSettings {
 	exportSummaryTemplate: string;
 	exportLogItemTemplate: string;
 	exportBodyTemplate: string;
-	dailyNotePathTemplate: string;
 	showReflectionInputOnSave: boolean;
 	appendToDailyNote: boolean;
 	inversePomodoroBreakRatio: number;

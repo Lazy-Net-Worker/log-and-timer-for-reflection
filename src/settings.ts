@@ -1,4 +1,4 @@
-import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
+import { App, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
 import { TaskMasterApplicationService } from './services';
 import { PluginSettings, TaskMaster } from './types';
 import { taskPath } from './utils';
@@ -18,7 +18,6 @@ export const DEFAULT_SETTINGS: PluginSettings = {
 	exportSummaryTemplate: '## Summary\n{{SUMMARY}}',
 	exportLogItemTemplate: '- {{START}} - {{END}} | {{TASK}} | {{DURATION}} | {{MEMO}}',
 	exportBodyTemplate: '{{SUMMARY}}\n\n{{LOGS}}',
-	dailyNotePathTemplate: '{{YYYY}}-{{MM}}-{{DD}}.md',
 	showReflectionInputOnSave: true,
 	appendToDailyNote: false,
 	inversePomodoroBreakRatio: 0.2,
@@ -28,23 +27,55 @@ export const DEFAULT_SETTINGS: PluginSettings = {
 	pomodoroInfinite: false,
 };
 export class ReflectionSettingTab extends PluginSettingTab {
+	private deps: {
+		settings: PluginSettings;
+		saveSettings: () => Promise<void>;
+		getTasks: () => TaskMaster[];
+		taskSvc?: TaskMasterApplicationService;
+		refresh: () => void;
+		replaceTasks?: (tasks: TaskMaster[]) => Promise<void>;
+	} | null = null;
+
 	constructor(
 		app: App,
-	private readonly plugin: {
-			settings: PluginSettings;
-			saveSettings: () => Promise<void>;
-			getTasks: () => TaskMaster[];
-			taskSvc: TaskMasterApplicationService;
-			refresh: () => void;
-			replaceTasks: (tasks: TaskMaster[]) => Promise<void>;
-		},
+		plugin: Plugin,
 	) {
-		super(app, plugin as any);
+		super(app, plugin);
+	}
+
+	setDeps(deps: {
+		settings: PluginSettings;
+		saveSettings: () => Promise<void>;
+		getTasks: () => TaskMaster[];
+		taskSvc?: TaskMasterApplicationService;
+		refresh: () => void;
+		replaceTasks?: (tasks: TaskMaster[]) => Promise<void>;
+	}): void {
+		this.deps = deps;
+	}
+
+	getSettingDefinitions(): [] {
+		return [];
 	}
 
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
+
+		const plugin = this.deps;
+		if (!plugin) {
+			containerEl.createEl('p', {
+				text: 'Plugin is still initializing. Open this tab again in a moment.',
+			});
+			return;
+		}
+		const { settings, saveSettings, getTasks, taskSvc, refresh, replaceTasks } = plugin;
+		if (!taskSvc || !replaceTasks) {
+			containerEl.createEl('p', {
+				text: 'Plugin is still initializing. Open this tab again in a moment.',
+			});
+			return;
+		}
 
 		new Setting(containerEl)
 			.setName('Week start day')
@@ -59,23 +90,23 @@ export class ReflectionSettingTab extends PluginSettingTab {
 						'5': 'Friday',
 						'6': 'Saturday',
 					})
-					.setValue(String(this.plugin.settings.weekStartDay))
+					.setValue(String(settings.weekStartDay))
 					.onChange(async (value) => {
-						this.plugin.settings.weekStartDay = Number(value) as PluginSettings['weekStartDay'];
-						await this.plugin.saveSettings();
+						settings.weekStartDay = Number(value) as PluginSettings['weekStartDay'];
+						await saveSettings();
 					}),
 			);
 
 		new Setting(containerEl)
 			.setName('Export file path')
 			.addText((text) =>
-				text.setValue(this.plugin.settings.exportFilePath).onChange(async (value) => {
-					this.plugin.settings.exportFilePath = value.trim() || DEFAULT_SETTINGS.exportFilePath;
-					await this.plugin.saveSettings();
+				text.setValue(settings.exportFilePath).onChange(async (value) => {
+					settings.exportFilePath = value.trim() || DEFAULT_SETTINGS.exportFilePath;
+					await saveSettings();
 				}),
 			);
 
-		containerEl.createEl('h3', { text: 'Log export' });
+		new Setting(containerEl).setName("Log export").setHeading();
 
 		new Setting(containerEl)
 			.setName('Export range type')
@@ -96,41 +127,41 @@ export class ReflectionSettingTab extends PluginSettingTab {
 						'month-range': 'Month range',
 						'year-range': 'Year range',
 					})
-					.setValue(this.plugin.settings.exportRangeType)
+					.setValue(settings.exportRangeType)
 					.onChange(async (value) => {
-						this.plugin.settings.exportRangeType = value as PluginSettings['exportRangeType'];
-						await this.plugin.saveSettings();
+						settings.exportRangeType = value as PluginSettings['exportRangeType'];
+						await saveSettings();
 						this.display();
 					}),
 			);
 
-		if (this.plugin.settings.exportRangeType === 'date-range' || this.plugin.settings.exportRangeType === 'week-range' || this.plugin.settings.exportRangeType === 'month-range' || this.plugin.settings.exportRangeType === 'year-range') {
+		if (settings.exportRangeType === 'date-range' || settings.exportRangeType === 'week-range' || settings.exportRangeType === 'month-range' || settings.exportRangeType === 'year-range') {
 			new Setting(containerEl)
 				.setName('Range from')
 				.addText((text) =>
-					text.setPlaceholder('2026-01-01').setValue(this.plugin.settings.exportRangeFrom).onChange(async (value) => {
-						this.plugin.settings.exportRangeFrom = value.trim();
-						await this.plugin.saveSettings();
+					text.setPlaceholder('2026-01-01').setValue(settings.exportRangeFrom).onChange(async (value) => {
+						settings.exportRangeFrom = value.trim();
+						await saveSettings();
 					}),
 				);
 			new Setting(containerEl)
 				.setName('Range to')
 				.addText((text) =>
-					text.setPlaceholder('2026-01-31').setValue(this.plugin.settings.exportRangeTo).onChange(async (value) => {
-						this.plugin.settings.exportRangeTo = value.trim();
-						await this.plugin.saveSettings();
+					text.setPlaceholder('2026-01-31').setValue(settings.exportRangeTo).onChange(async (value) => {
+						settings.exportRangeTo = value.trim();
+						await saveSettings();
 					}),
 				);
 		}
 
-		if (this.plugin.settings.exportRangeType === 'days-ago' || this.plugin.settings.exportRangeType === 'weeks-ago' || this.plugin.settings.exportRangeType === 'months-ago' || this.plugin.settings.exportRangeType === 'years-ago') {
+		if (settings.exportRangeType === 'days-ago' || settings.exportRangeType === 'weeks-ago' || settings.exportRangeType === 'months-ago' || settings.exportRangeType === 'years-ago') {
 			new Setting(containerEl)
 				.setName('Range offset')
 				.addText((text) => {
 					text.inputEl.type = 'number';
-					text.setValue(String(this.plugin.settings.exportRangeOffset)).onChange(async (value) => {
-						this.plugin.settings.exportRangeOffset = Math.max(0, Number(value) || 0);
-						await this.plugin.saveSettings();
+					text.setValue(String(settings.exportRangeOffset)).onChange(async (value) => {
+						settings.exportRangeOffset = Math.max(0, Number(value) || 0);
+						await saveSettings();
 					});
 				});
 		}
@@ -138,18 +169,18 @@ export class ReflectionSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName('Include summary')
 			.addToggle((toggle) =>
-				toggle.setValue(this.plugin.settings.exportIncludeSummary).onChange(async (value) => {
-					this.plugin.settings.exportIncludeSummary = value;
-					await this.plugin.saveSettings();
+				toggle.setValue(settings.exportIncludeSummary).onChange(async (value) => {
+					settings.exportIncludeSummary = value;
+					await saveSettings();
 				}),
 			);
 
 		new Setting(containerEl)
 			.setName('Include logs')
 			.addToggle((toggle) =>
-				toggle.setValue(this.plugin.settings.exportIncludeLogs).onChange(async (value) => {
-					this.plugin.settings.exportIncludeLogs = value;
-					await this.plugin.saveSettings();
+				toggle.setValue(settings.exportIncludeLogs).onChange(async (value) => {
+					settings.exportIncludeLogs = value;
+					await saveSettings();
 				}),
 			);
 
@@ -157,9 +188,9 @@ export class ReflectionSettingTab extends PluginSettingTab {
 			.setName('{{SUMMARY}} template')
 			.setDesc('Use {{H}}, {{MIN}}, {{SEC}}, {{TASK}}, and {{COUNT}}.')
 			.addTextArea((text) =>
-				text.setValue(this.plugin.settings.exportSummaryTemplate).onChange(async (value) => {
-					this.plugin.settings.exportSummaryTemplate = value;
-					await this.plugin.saveSettings();
+				text.setValue(settings.exportSummaryTemplate).onChange(async (value) => {
+					settings.exportSummaryTemplate = value;
+					await saveSettings();
 				}),
 			);
 
@@ -167,9 +198,9 @@ export class ReflectionSettingTab extends PluginSettingTab {
 			.setName('{{LOGS}} template')
 			.setDesc('Use {{START}}, {{END}}, {{TASK}}, {{DURATION}}, {{MEMO}}, {{YYYY}}, {{MM}}, {{DD}}.')
 			.addTextArea((text) =>
-				text.setValue(this.plugin.settings.exportLogItemTemplate).onChange(async (value) => {
-					this.plugin.settings.exportLogItemTemplate = value;
-					await this.plugin.saveSettings();
+				text.setValue(settings.exportLogItemTemplate).onChange(async (value) => {
+					settings.exportLogItemTemplate = value;
+					await saveSettings();
 				}),
 			);
 
@@ -177,51 +208,41 @@ export class ReflectionSettingTab extends PluginSettingTab {
 			.setName('Body template')
 			.setDesc('Use {{SUMMARY}}, {{LOGS}}, and {{RANGE}}.')
 			.addTextArea((text) =>
-				text.setValue(this.plugin.settings.exportBodyTemplate).onChange(async (value) => {
-					this.plugin.settings.exportBodyTemplate = value;
-					await this.plugin.saveSettings();
-				}),
-			);
-
-		new Setting(containerEl)
-			.setName('Daily note path template')
-			.setDesc('Example: folder/{{YYYY}}-{{MM}}-{{DD}} or {{YYYY}}/{{MM}}/{{DD}}.md')
-			.addText((text) =>
-				text.setValue(this.plugin.settings.dailyNotePathTemplate).onChange(async (value) => {
-					this.plugin.settings.dailyNotePathTemplate = value.trim() || DEFAULT_SETTINGS.dailyNotePathTemplate;
-					await this.plugin.saveSettings();
+				text.setValue(settings.exportBodyTemplate).onChange(async (value) => {
+					settings.exportBodyTemplate = value;
+					await saveSettings();
 				}),
 			);
 
 		new Setting(containerEl)
 			.setName('Show reflection input on save')
 			.addToggle((toggle) =>
-				toggle.setValue(this.plugin.settings.showReflectionInputOnSave).onChange(async (value) => {
-					this.plugin.settings.showReflectionInputOnSave = value;
-					await this.plugin.saveSettings();
+				toggle.setValue(settings.showReflectionInputOnSave).onChange(async (value) => {
+					settings.showReflectionInputOnSave = value;
+					await saveSettings();
 				}),
 			);
 
 		new Setting(containerEl)
 			.setName('Append export to daily note')
-			.setDesc('When enabled, export writes to today\'s daily note instead of the configured file path.')
+			.setDesc('Append export to Obsidian\'s daily note.')
 			.addToggle((toggle) =>
-				toggle.setValue(this.plugin.settings.appendToDailyNote).onChange(async (value) => {
-					this.plugin.settings.appendToDailyNote = value;
-					await this.plugin.saveSettings();
+				toggle.setValue(settings.appendToDailyNote).onChange(async (value) => {
+					settings.appendToDailyNote = value;
+					await saveSettings();
 				}),
 			);
 
-		containerEl.createEl('h3', { text: 'Timer presets' });
+		new Setting(containerEl).setName("Timer presets").setHeading();
 
 		new Setting(containerEl)
 			.setName('Inverse pomodoro break ratio')
 			.setDesc('Example: 0.2 means 50 minutes of work becomes 10 minutes of rest.')
 			.addText((text) => {
 				text.inputEl.step = '0.01';
-				text.setValue(String(this.plugin.settings.inversePomodoroBreakRatio)).onChange(async (value) => {
-					this.plugin.settings.inversePomodoroBreakRatio = Math.max(0, Number.parseFloat(value) || DEFAULT_SETTINGS.inversePomodoroBreakRatio);
-					await this.plugin.saveSettings();
+				text.setValue(String(settings.inversePomodoroBreakRatio)).onChange(async (value) => {
+					settings.inversePomodoroBreakRatio = Math.max(0, Number.parseFloat(value) || DEFAULT_SETTINGS.inversePomodoroBreakRatio);
+					await saveSettings();
 				});
 			});
 
@@ -229,9 +250,9 @@ export class ReflectionSettingTab extends PluginSettingTab {
 			.setName('Pomodoro work minutes')
 			.addText((text) => {
 				text.inputEl.step = '0.1';
-				text.setValue(String(this.plugin.settings.pomodoroWorkMinutes)).onChange(async (value) => {
-					this.plugin.settings.pomodoroWorkMinutes = Math.max(0.1, Number.parseFloat(value) || DEFAULT_SETTINGS.pomodoroWorkMinutes);
-					await this.plugin.saveSettings();
+				text.setValue(String(settings.pomodoroWorkMinutes)).onChange(async (value) => {
+					settings.pomodoroWorkMinutes = Math.max(0.1, Number.parseFloat(value) || DEFAULT_SETTINGS.pomodoroWorkMinutes);
+					await saveSettings();
 				});
 			});
 
@@ -239,9 +260,9 @@ export class ReflectionSettingTab extends PluginSettingTab {
 			.setName('Pomodoro break minutes')
 			.addText((text) => {
 				text.inputEl.step = '0.1';
-				text.setValue(String(this.plugin.settings.pomodoroBreakMinutes)).onChange(async (value) => {
-					this.plugin.settings.pomodoroBreakMinutes = Math.max(0.1, Number.parseFloat(value) || DEFAULT_SETTINGS.pomodoroBreakMinutes);
-					await this.plugin.saveSettings();
+				text.setValue(String(settings.pomodoroBreakMinutes)).onChange(async (value) => {
+					settings.pomodoroBreakMinutes = Math.max(0.1, Number.parseFloat(value) || DEFAULT_SETTINGS.pomodoroBreakMinutes);
+					await saveSettings();
 				});
 			});
 
@@ -249,9 +270,9 @@ export class ReflectionSettingTab extends PluginSettingTab {
 			.setName('Pomodoro repeat count')
 			.setDesc('How many work sessions to repeat before stopping.')
 			.addText((text) =>
-				text.setValue(String(this.plugin.settings.pomodoroRounds)).onChange(async (value) => {
-					this.plugin.settings.pomodoroRounds = Math.max(1, Number(value) || DEFAULT_SETTINGS.pomodoroRounds);
-					await this.plugin.saveSettings();
+				text.setValue(String(settings.pomodoroRounds)).onChange(async (value) => {
+					settings.pomodoroRounds = Math.max(1, Number(value) || DEFAULT_SETTINGS.pomodoroRounds);
+					await saveSettings();
 				}),
 			);
 
@@ -259,48 +280,60 @@ export class ReflectionSettingTab extends PluginSettingTab {
 			.setName('Repeat forever')
 			.setDesc('When enabled, pomodoro cycles continue without a fixed end.')
 			.addToggle((toggle) =>
-				toggle.setValue(this.plugin.settings.pomodoroInfinite).onChange(async (value) => {
-					this.plugin.settings.pomodoroInfinite = value;
-					await this.plugin.saveSettings();
+				toggle.setValue(settings.pomodoroInfinite).onChange(async (value) => {
+					settings.pomodoroInfinite = value;
+					await saveSettings();
 				}),
 			);
 
-		containerEl.createEl('h3', { text: 'Task master' });
+		new Setting(containerEl).setName("Task master").setHeading();
 
 		new Setting(containerEl)
 			.setName('Add new task')
 			.addButton((button) =>
-				button.setButtonText('Add').onClick(() => {
+					button.setButtonText('Add').onClick(() => {
+					if (!taskSvc || !replaceTasks) {
+						new Notice('Plugin is still initializing.');
+						return;
+					}
 					new TaskModal(this.app, async (input) => {
-						const task = await this.plugin.taskSvc.create(input, new Date());
-						const tasks = this.plugin.getTasks();
-						await this.plugin.replaceTasks([...tasks, task]);
-						this.plugin.refresh();
+						const task = await taskSvc.create(input, new Date());
+						const tasks = getTasks();
+						await replaceTasks([...tasks, task]);
+						refresh();
 						this.display();
 					}).open();
 				}),
 			);
 
-		const tasks = this.plugin.getTasks();
+		const tasks = getTasks();
 		for (const task of tasks) {
 			const setting = new Setting(containerEl).setName(taskPath(task)).setDesc(`${task.category} / ${task.subcategory}`);
 			setting.addButton((button) =>
 				button.setButtonText('Edit').onClick(() => {
+					if (!taskSvc || !replaceTasks) {
+						new Notice('Plugin is still initializing.');
+						return;
+					}
 					new TaskModal(this.app, async (input) => {
-						const updated = await this.plugin.taskSvc.update(task, input, new Date());
-						const tasks = this.plugin.getTasks().map((item) => (item.id === updated.id ? updated : item));
-						await this.plugin.replaceTasks(tasks);
-						this.plugin.refresh();
+						const updated = await taskSvc.update(task, input, new Date());
+						const tasks = getTasks().map((item) => (item.id === updated.id ? updated : item));
+						await replaceTasks(tasks);
+						refresh();
 						this.display();
 					}, task).open();
 				}),
 			);
 			setting.addButton((button) =>
 				button.setButtonText('Delete').setWarning().onClick(async () => {
+					if (!taskSvc || !replaceTasks) {
+						new Notice('Plugin is still initializing.');
+						return;
+					}
 					try {
-						await this.plugin.taskSvc.delete(task.id);
-						await this.plugin.replaceTasks(this.plugin.getTasks().filter((item) => item.id !== task.id));
-						this.plugin.refresh();
+						await taskSvc.delete(task.id);
+						await replaceTasks(getTasks().filter((item) => item.id !== task.id));
+						refresh();
 						this.display();
 					} catch (error) {
 						new Notice(error instanceof Error ? error.message : 'Delete failed');

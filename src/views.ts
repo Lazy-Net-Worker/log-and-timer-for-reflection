@@ -86,10 +86,10 @@ export class TimerView extends ItemView {
 		this.currentState = this.getTimerState();
 
 		contentEl.createEl('h2', { text: 'Timer' });
-		this.totalEl = contentEl.createEl('div');
-		this.elapsedEl = contentEl.createEl('div');
-		this.remainingEl = contentEl.createEl('div');
-		this.statusEl = contentEl.createEl('div');
+		this.totalEl = contentEl.createDiv();
+		this.elapsedEl = contentEl.createDiv();
+		this.remainingEl = contentEl.createDiv();
+		this.statusEl = contentEl.createDiv();
 
 		this.selectEl = contentEl.createEl('select');
 		this.selectEl.disabled = tasks.length === 0;
@@ -337,7 +337,7 @@ export class TimerView extends ItemView {
 					this.messageEl.classList.add('is-hidden');
 				}
 			} else if (state.status === 'completed') {
-				this.messageEl.textContent = 'Timer completed. Press Reset to save the session.';
+				this.messageEl.textContent = 'Timer completed. Press reset to save the session.';
 				this.messageEl.classList.remove('is-hidden');
 			} else {
 				this.messageEl.textContent = '';
@@ -405,7 +405,7 @@ export class LogView extends ItemView {
 		contentEl.createEl('h2', { text: 'Logs' });
 
 		const controls = contentEl.createDiv({ cls: 'ltfr-log-controls' });
-		controls.createEl('div', { text: 'Term' });
+		controls.createDiv({ text: 'Term' });
 		this.rangeSelectEl = controls.createEl('select');
 		for (const [value, label] of [
 			['today', 'Today'],
@@ -430,7 +430,7 @@ export class LogView extends ItemView {
 			void this.refreshList();
 		};
 
-		controls.createEl('div', { text: 'Range' });
+		controls.createDiv({ text: 'Range' });
 		this.fromInputEl = controls.createEl('input', { type: 'date' });
 		this.fromInputEl.value = this.rangeFrom ?? '';
 		this.fromInputEl.onchange = () => {
@@ -445,7 +445,7 @@ export class LogView extends ItemView {
 			void this.refreshList();
 		};
 
-		controls.createEl('div', { text: 'Offset' });
+		controls.createDiv({ text: 'Offset' });
 		this.offsetInputEl = controls.createEl('input', { type: 'number' });
 		this.offsetInputEl.value = String(this.rangeOffset);
 		this.offsetInputEl.onchange = () => {
@@ -453,7 +453,7 @@ export class LogView extends ItemView {
 			void this.refreshList();
 		};
 
-		controls.createEl('div', { text: 'Keyword' });
+		controls.createDiv({ text: 'Keyword' });
 		this.searchInputEl = controls.createEl('input', { type: 'search' });
 		this.searchInputEl.value = this.searchText;
 		this.searchInputEl.placeholder = 'Search task or memo';
@@ -492,8 +492,8 @@ export class LogView extends ItemView {
 
 		for (const log of filteredLogs) {
 			const row = this.listEl.createDiv({ cls: 'ltfr-log-row' });
-			row.createEl('div', { text: `${log.taskPath} / ${log.durationText}` });
-			row.createEl('div', { text: log.memo || '' });
+			row.createDiv({ text: `${log.taskPath} / ${log.durationText}` });
+			row.createDiv({ text: log.memo || '' });
 			row.onclick = async () => {
 				const original = allLogs.find((item) => item.id === log.id);
 				if (!original) {

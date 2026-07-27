@@ -1,4 +1,4 @@
-import { Notice, Vault } from 'obsidian';
+import { App, Notice, TFile, Vault, moment, normalizePath } from 'obsidian';
 import { AggregatedLog, LogEntry, LogViewModel, PluginSettings, TaskMaster, TaskRef, TimerState, TimerStateDTO } from './types';
 import { formatDateKey, formatDuration, makeId, nowIso, parseStoredDate, taskPath, toTaskRef } from './utils';
 import { LogRepository, TaskRepository, TimerRepository } from './repository';
@@ -424,14 +424,15 @@ export class ExportApplicationService {
 		private readonly logRepo: LogRepository,
 		private readonly vault: Vault,
 		private readonly settings: PluginSettings,
+		private readonly app?: App,
 	) {}
 
 	async exportCurrentSelection(referenceDate = new Date()): Promise<void> {
 		const range = resolveExportRange(this.settings, referenceDate);
 		const logs = filterLogsByRange(await this.logRepo.findAll(), range);
 		const markdown = buildExportContent(this.settings, logs, range);
-		await this.writeExportFile(markdown, range.from, shouldUseDailyNote(this.settings.exportRangeType));
-		new Notice(`Log exported: ${range.label}`);
+		const target = await this.writeExportFile(markdown, range.from, this.settings.appendToDailyNote);
+		new Notice(this.getExportNoticeLabel(target, range.label));
 	}
 
 	async exportWithRangeType(rangeType: PluginSettings['exportRangeType'], referenceDate = new Date()): Promise<void> {
@@ -439,8 +440,8 @@ export class ExportApplicationService {
 		const range = resolveExportRange(exportSettings, referenceDate);
 		const logs = filterLogsByRange(await this.logRepo.findAll(), range);
 		const markdown = buildExportContent(exportSettings, logs, range);
-		await this.writeExportFile(markdown, range.from, shouldUseDailyNote(rangeType));
-		new Notice(`Log exported: ${range.label}`);
+		const target = await this.writeExportFile(markdown, range.from, exportSettings.appendToDailyNote);
+		new Notice(this.getExportNoticeLabel(target, range.label));
 	}
 
 	async exportPeriod(period: 'day' | 'week' | 'month' | 'year', referenceDate: Date): Promise<void> {
@@ -451,14 +452,14 @@ export class ExportApplicationService {
 		});
 		const range = { from: referenceDate, to: referenceDate, label: period };
 		const markdown = buildExportContent(this.settings, filtered, range);
-		await this.writeExportFile(markdown, referenceDate, false);
-		new Notice(`${period} log exported`);
+		const target = await this.writeExportFile(markdown, referenceDate, false);
+		new Notice(this.getExportNoticeLabel(target, `${period}`));
 	}
 
 	async labelExportPeriod(referenceDate = new Date()): Promise<void> {
 		const range = resolveExportRange(this.settings, referenceDate);
 		const label = `${range.label} (${referenceDate.toLocaleDateString()})`;
-		const file = this.resolveOutputFile(referenceDate, shouldUseDailyNote(this.settings.exportRangeType));
+		const file = this.resolveOutputFile();
 		const existing = await this.vault.adapter.read(file).catch(() => '');
 		const separator = existing && !existing.endsWith('\n') ? '\n' : '';
 		const header = `\n\n## Export period\n${label}\n`;
@@ -486,14 +487,33 @@ export class ExportApplicationService {
 		return filterLogsByRange(await this.logRepo.findAll(), range);
 	}
 
-	private async writeExportFile(content: string, referenceDate: Date, useDailyNote: boolean): Promise<void> {
-		const file = this.resolveOutputFile(referenceDate, useDailyNote);
-		await this.writeRaw(file, content);
+	private async writeExportFile(content: string, referenceDate: Date, appendToDailyNote: boolean): Promise<string> {
+		try {
+			if (appendToDailyNote) {
+				const file = await this.openStandardDailyNote(referenceDate);
+				if (!file) {
+					new Notice('Could not create daily note.');
+					return '';
+				}
+				await this.appendToFile(file, content);
+				return file.path;
+			}
+			const file = this.resolveOutputFile();
+			await this.writeRaw(file, content);
+			return file;
+		} catch (error) {
+			new Notice(error instanceof Error ? error.message : 'Export failed');
+			return '';
+		}
 	}
 
-	private resolveOutputFile(referenceDate: Date, useDailyNote: boolean): string {
-		const file = useDailyNote ? this.renderDailyNotePath(referenceDate) : this.settings.exportFilePath;
-		return this.normalizePath(file);
+	private getExportNoticeLabel(target: string, fallbackLabel: string): string {
+		const fileName = target ? target.split('/').pop() ?? fallbackLabel : fallbackLabel;
+		return `Log exported: ${fileName}`;
+	}
+
+	private resolveOutputFile(): string {
+		return this.normalizePath(this.settings.exportFilePath);
 	}
 
 	private async writeRaw(file: string, content: string): Promise<void> {
@@ -504,6 +524,12 @@ export class ExportApplicationService {
 		const existing = await this.vault.adapter.read(file).catch(() => '');
 		const separator = existing && !existing.endsWith('\n') ? '\n' : '';
 		await this.vault.adapter.write(file, `${existing}${separator}${content}\n`);
+	}
+
+	private async appendToFile(file: TFile, content: string): Promise<void> {
+		const existing = await this.vault.read(file);
+		const separator = existing && !existing.endsWith('\n') ? '\n' : '';
+		await this.vault.modify(file, `${existing}${separator}${content}\n`);
 	}
 
 	private async ensureDirectory(path: string): Promise<void> {
@@ -522,12 +548,83 @@ export class ExportApplicationService {
 		return path.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/^\/+/, '');
 	}
 
-	private renderDailyNotePath(referenceDate: Date): string {
-		return renderTemplate(this.settings.dailyNotePathTemplate, {
-			YYYY: String(referenceDate.getFullYear()),
-			MM: String(referenceDate.getMonth() + 1).padStart(2, '0'),
-			DD: String(referenceDate.getDate()).padStart(2, '0'),
-		});
+	private async openStandardDailyNote(referenceDate: Date): Promise<TFile | null> {
+		const settings = this.getDailyNoteSettings();
+		const filename = moment(referenceDate).format(settings.format);
+		const path = await this.getDailyNotePath(settings.folder, filename);
+		const existing = this.app!.vault.getAbstractFileByPath(path);
+		if (existing instanceof TFile) {
+			return existing;
+		}
+		const templateContents = await this.getDailyNoteTemplateContents(settings.template);
+		const createdFile = await this.app!.vault.create(path, this.applyDailyNoteTemplate(templateContents, referenceDate, settings.format, filename));
+		return createdFile instanceof TFile ? createdFile : null;
+	}
+
+	private getDailyNoteSettings(): { folder: string; format: string; template: string } {
+		const app = this.app as unknown as {
+			internalPlugins?: {
+				plugins?: Record<string, { enabled?: boolean; instance?: { options?: { folder?: string; format?: string; template?: string } } }>;
+			};
+		};
+		const dailyNotes = app.internalPlugins?.plugins?.['daily-notes']?.instance?.options;
+		return {
+			folder: dailyNotes?.folder?.trim() || '',
+			format: dailyNotes?.format || 'YYYY-MM-DD',
+			template: dailyNotes?.template?.trim() || '',
+		};
+	}
+
+	private async getDailyNotePath(folder: string, filename: string): Promise<string> {
+		const path = filename.endsWith('.md') ? filename : `${filename}.md`;
+		const normalized = normalizePath(folder ? `${folder}/${path}` : path);
+		const parts = normalized.replace(/\\/g, '/').split('/');
+		if (parts.length > 1) {
+			const dir = parts.slice(0, -1).join('/');
+			if (dir && !(await this.vault.adapter.exists(dir))) {
+				await this.vault.adapter.mkdir(dir);
+			}
+		}
+		return normalized;
+	}
+
+	private async getDailyNoteTemplateContents(template: string): Promise<string> {
+		if (!template) {
+			return '';
+		}
+		const templatePath = normalizePath(template);
+		if (templatePath === '/') {
+			return '';
+		}
+		const templateFile = this.app!.metadataCache.getFirstLinkpathDest(templatePath, '');
+		if (!(templateFile instanceof TFile)) {
+			return '';
+		}
+		return await this.vault.cachedRead(templateFile).catch(() => '');
+	}
+
+	private applyDailyNoteTemplate(template: string, referenceDate: Date, format: string, filename: string): string {
+		return template
+			.replace(/{{\s*date\s*}}/gi, filename)
+			.replace(/{{\s*time\s*}}/gi, moment().format('HH:mm'))
+			.replace(/{{\s*title\s*}}/gi, filename)
+			.replace(/{{\s*(date|time)\s*(([+-]\d+)([yqmwdhs]))?\s*(:.+?)?}}/gi, (_match, _timeOrDate, calc, timeDelta, unit, momentFormat) => {
+				const now = moment();
+				const currentDate = moment(referenceDate).set({
+					hour: now.hour(),
+					minute: now.minute(),
+					second: now.second(),
+				});
+				if (calc) {
+					currentDate.add(parseInt(timeDelta, 10), unit);
+				}
+				if (momentFormat) {
+					return currentDate.format(momentFormat.substring(1).trim());
+				}
+				return currentDate.format(format);
+			})
+			.replace(/{{\s*yesterday\s*}}/gi, moment(referenceDate).subtract(1, 'day').format(format))
+			.replace(/{{\s*tomorrow\s*}}/gi, moment(referenceDate).add(1, 'day').format(format));
 	}
 
 	private matchesPeriod(date: Date, period: 'day' | 'week' | 'month' | 'year', referenceDate: Date): boolean {

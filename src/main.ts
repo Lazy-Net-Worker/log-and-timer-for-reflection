@@ -18,6 +18,7 @@ import { LOG_VIEW_TYPE, LogView, TIMER_VIEW_TYPE, TimerView } from './views';
 
 export default class ReflectionPlugin extends Plugin {
 	settings!: PluginSettings;
+	private settingTab!: ReflectionSettingTab;
 	private dataRepo!: PluginDataRepository;
 	private logRepo!: PluginLogRepository;
 	private taskRepo!: PluginTaskRepository;
@@ -31,7 +32,20 @@ export default class ReflectionPlugin extends Plugin {
 	private taskCache: TaskMaster[] = [];
 	private selectedTaskId: string | null = null;
 
-	async onload(): Promise<void> {
+	override onload(): void {
+		this.settings = { ...DEFAULT_SETTINGS };
+		this.settingTab = new ReflectionSettingTab(this.app, this);
+		this.settingTab.setDeps({
+			settings: this.settings,
+			saveSettings: this.saveSettings.bind(this),
+			getTasks: this.getTasks.bind(this),
+			refresh: this.refresh.bind(this),
+		});
+		this.addSettingTab(this.settingTab);
+		void this.initialize();
+	}
+
+	private async initialize(): Promise<void> {
 		this.dataRepo = new PluginDataRepository(this);
 		const data = await this.dataRepo.getAll();
 		this.settings = { ...DEFAULT_SETTINGS, ...(data.settings ?? {}) };
@@ -43,7 +57,7 @@ export default class ReflectionPlugin extends Plugin {
 		this.taskSvc = new TaskMasterApplicationService(this.taskRepo, this.timerRepo);
 		this.logEditSvc = new LogEditApplicationService(this.logRepo);
 		this.querySvc = new LogQueryApplicationService(this.logRepo);
-		this.exportSvc = new ExportApplicationService(this.logRepo, this.app.vault, this.settings);
+		this.exportSvc = new ExportApplicationService(this.logRepo, this.app.vault, this.settings, this.app);
 		this.timerState = this.timerSvc.getStateDTO(data.timer);
 		this.taskCache = data.tasks ?? [];
 		this.selectedTaskId = this.timerState.taskId;
@@ -77,7 +91,15 @@ export default class ReflectionPlugin extends Plugin {
 		this.addCommand({ id: 'show-summary-task-names', name: 'Show summary task names', callback: () => void this.exportSvc.showSummaryTaskNames(new Date()) });
 		this.addCommand({ id: 'show-summary-total-duration', name: 'Show summary total duration', callback: () => void this.exportSvc.showSummaryTotalDuration(new Date()) });
 		this.addCommand({ id: 'show-summary-task-count', name: 'Show summary task count', callback: () => void this.exportSvc.showSummaryTaskCount(new Date()) });
-		this.addSettingTab(new ReflectionSettingTab(this.app, this as any));
+		this.settingTab.setDeps({
+			settings: this.settings,
+			saveSettings: this.saveSettings.bind(this),
+			getTasks: this.getTasks.bind(this),
+			taskSvc: this.taskSvc,
+			refresh: this.refresh.bind(this),
+			replaceTasks: this.replaceTasks.bind(this),
+		});
+		this.settingTab.display();
 
 		this.app.workspace.onLayoutReady(() => {
 			this.refreshViews();
@@ -95,8 +117,8 @@ export default class ReflectionPlugin extends Plugin {
 		}, 1000));
 	}
 
-	async onunload(): Promise<void> {
-		await this.timerSvc.onPluginUnload(new Date());
+	override onunload(): void {
+		void this.timerSvc?.onPluginUnload(new Date());
 	}
 
 	async saveSettings(): Promise<void> {
@@ -120,10 +142,14 @@ export default class ReflectionPlugin extends Plugin {
 			this.selectedTaskId = this.timerState.taskId;
 		}
 		for (const leaf of this.app.workspace.getLeavesOfType(TIMER_VIEW_TYPE)) {
-			(leaf.view as any)?.refresh?.();
+			if (leaf.view instanceof TimerView) {
+				void leaf.view.refresh();
+			}
 		}
 		for (const leaf of this.app.workspace.getLeavesOfType(LOG_VIEW_TYPE)) {
-			(leaf.view as any)?.render?.();
+			if (leaf.view instanceof LogView) {
+				void leaf.view.render();
+			}
 		}
 	}
 
@@ -135,19 +161,24 @@ export default class ReflectionPlugin extends Plugin {
 	private async openTimerView(): Promise<void> {
 		const leaf = this.app.workspace.getLeaf(true);
 		await leaf.setViewState({ type: TIMER_VIEW_TYPE, active: true });
-		this.app.workspace.revealLeaf(leaf);
+		await this.app.workspace.revealLeaf(leaf);
 	}
 
 	private async openLogView(): Promise<void> {
 		const leaf = this.app.workspace.getLeaf(true);
 		await leaf.setViewState({ type: LOG_VIEW_TYPE, active: true });
-		this.app.workspace.revealLeaf(leaf);
+		await this.app.workspace.revealLeaf(leaf);
 	}
 
 	private async openSettingsTab(): Promise<void> {
-		const setting = (this.app as any).setting;
-		setting.open();
-		setting.openTabById(this.manifest.id);
+		const setting = this.app as unknown as {
+			setting: {
+				open: () => void;
+				openTabById: (id: string) => void;
+			};
+		};
+		setting.setting.open();
+		setting.setting.openTabById(this.manifest.id);
 	}
 
 	private getActiveTaskId(): string | null {
