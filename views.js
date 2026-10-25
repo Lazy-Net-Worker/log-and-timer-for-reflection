@@ -3,7 +3,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.LogView = exports.TimerView = exports.LOG_VIEW_TYPE = exports.TIMER_VIEW_TYPE = void 0;
 const obsidian_1 = require("obsidian");
 const utils_1 = require("./utils");
-const utils_2 = require("./utils");
 const log_edit_modal_1 = require("./ui/log-edit-modal");
 const reflection_modal_1 = require("./ui/reflection-modal");
 exports.TIMER_VIEW_TYPE = 'ltfr-timer-view';
@@ -36,6 +35,7 @@ class TimerView extends obsidian_1.ItemView {
         this.tasksSignature = '';
         this.currentState = null;
         this.rafHandle = null;
+        this.resizeObserver = null;
     }
     getViewType() {
         return exports.TIMER_VIEW_TYPE;
@@ -49,9 +49,34 @@ class TimerView extends obsidian_1.ItemView {
     async onOpen() {
         await this.render();
         this.updateTicker();
+        this.resizeObserver = new ResizeObserver((entries) => {
+            for (const entry of entries) {
+                const width = entry.contentRect.width;
+                const height = entry.contentRect.height;
+                if (width === 0 || height === 0)
+                    continue;
+                const scale = Math.min(width / 300, height / 600);
+                const clampedScale = Math.max(0.6, Math.min(2.0, scale));
+                this.contentEl.style.setProperty('--ui-scale', String(clampedScale));
+                const actionsEl = this.contentEl.querySelector('.ltfr-actions-grid');
+                if (actionsEl) {
+                    if (width < 280) {
+                        actionsEl.classList.add('is-narrow');
+                    }
+                    else {
+                        actionsEl.classList.remove('is-narrow');
+                    }
+                }
+            }
+        });
+        this.resizeObserver.observe(this.contentEl);
     }
     async onClose() {
         this.stopTicker();
+        if (this.resizeObserver) {
+            this.resizeObserver.disconnect();
+            this.resizeObserver = null;
+        }
         await super.onClose();
     }
     async render() {
@@ -73,12 +98,18 @@ class TimerView extends obsidian_1.ItemView {
         const tasks = this.getTasks();
         this.tasksSignature = tasks.map((task) => task.id).join('|');
         this.currentState = this.getTimerState();
-        contentEl.createEl('h2', { text: 'Timer' });
-        this.totalEl = contentEl.createDiv();
-        this.elapsedEl = contentEl.createDiv();
-        this.remainingEl = contentEl.createDiv();
-        this.statusEl = contentEl.createDiv();
-        this.selectEl = contentEl.createEl('select');
+        const container = contentEl.createDiv({ cls: 'ltfr-timer-container' });
+        container.createEl('h2', { text: 'Timer' });
+        // Display Card
+        const displayCard = container.createDiv({ cls: 'ltfr-timer-display-card' });
+        this.statusEl = displayCard.createDiv({ cls: 'ltfr-status-badge' });
+        this.remainingEl = displayCard.createDiv({ cls: 'ltfr-timer-large-time' });
+        this.elapsedEl = displayCard.createDiv({ cls: 'ltfr-timer-sub-time' });
+        this.totalEl = displayCard.createDiv({ cls: 'ltfr-timer-sub-time' });
+        // Task Selector
+        const selectorWrap = container.createDiv({ cls: 'ltfr-task-selector-wrap' });
+        selectorWrap.createEl('label', { text: 'Active Task' });
+        this.selectEl = selectorWrap.createEl('select');
         this.selectEl.disabled = tasks.length === 0;
         this.selectEl.createEl('option', { text: 'Select task', value: '' });
         for (const task of tasks) {
@@ -90,16 +121,35 @@ class TimerView extends obsidian_1.ItemView {
             this.syncButtons();
             this.syncMessage();
         };
-        const actions = contentEl.createDiv({ cls: 'ltfr-actions' });
-        this.reversePomodoroBtn = actions.createEl('button', { text: 'Start reverse pomodoro' });
-        this.pomodoroBtn = actions.createEl('button', { text: 'Start pomodoro' });
-        this.breakBtn = actions.createEl('button', { text: 'Take break' });
-        this.resumeWorkBtn = actions.createEl('button', { text: 'Resume work' });
-        this.pauseBtn = actions.createEl('button', { text: 'Pause' });
-        this.resumeBtn = actions.createEl('button', { text: 'Resume' });
-        this.resetBtn = actions.createEl('button', { text: 'Reset' });
-        const taskBtn = actions.createEl('button', { text: 'Open task settings' });
-        const logBtn = actions.createEl('button', { text: 'Open logs' });
+        // Actions Grid
+        const actions = container.createDiv({ cls: 'ltfr-actions-grid' });
+        this.reversePomodoroBtn = actions.createEl('button', { cls: 'ltfr-btn-accent' });
+        (0, obsidian_1.setIcon)(this.reversePomodoroBtn, 'play');
+        this.reversePomodoroBtn.createSpan({ text: 'Start reverse pomodoro' });
+        this.pomodoroBtn = actions.createEl('button');
+        (0, obsidian_1.setIcon)(this.pomodoroBtn, 'timer');
+        this.pomodoroBtn.createSpan({ text: 'Start pomodoro' });
+        this.breakBtn = actions.createEl('button', { cls: 'ltfr-btn-accent' });
+        (0, obsidian_1.setIcon)(this.breakBtn, 'coffee');
+        this.breakBtn.createSpan({ text: 'Take break' });
+        this.resumeWorkBtn = actions.createEl('button', { cls: 'ltfr-btn-accent' });
+        (0, obsidian_1.setIcon)(this.resumeWorkBtn, 'play');
+        this.resumeWorkBtn.createSpan({ text: 'Resume work' });
+        this.pauseBtn = actions.createEl('button');
+        (0, obsidian_1.setIcon)(this.pauseBtn, 'pause');
+        this.pauseBtn.createSpan({ text: 'Pause' });
+        this.resumeBtn = actions.createEl('button', { cls: 'ltfr-btn-accent' });
+        (0, obsidian_1.setIcon)(this.resumeBtn, 'play');
+        this.resumeBtn.createSpan({ text: 'Resume' });
+        this.resetBtn = actions.createEl('button', { cls: 'mod-warning' });
+        (0, obsidian_1.setIcon)(this.resetBtn, 'rotate-ccw');
+        this.resetBtn.createSpan({ text: 'Reset' });
+        const taskBtn = actions.createEl('button');
+        (0, obsidian_1.setIcon)(taskBtn, 'settings');
+        taskBtn.createSpan({ text: 'Settings' });
+        const logBtn = actions.createEl('button');
+        (0, obsidian_1.setIcon)(logBtn, 'list');
+        logBtn.createSpan({ text: 'Logs' });
         this.reversePomodoroBtn.onclick = async () => {
             const taskId = this.selectEl?.value ?? '';
             this.applyOptimisticState({
@@ -108,7 +158,7 @@ class TimerView extends obsidian_1.ItemView {
                 elapsedSec: 0,
                 sessionElapsedSec: 0,
                 taskId: taskId || null,
-                startTime: (0, utils_2.nowIso)(new Date()),
+                startTime: (0, utils_1.nowIso)(new Date()),
                 remainingSec: null,
                 targetSec: null,
                 pomodoroPhase: 'work',
@@ -125,7 +175,7 @@ class TimerView extends obsidian_1.ItemView {
                 elapsedSec: 0,
                 sessionElapsedSec: 0,
                 taskId: taskId || null,
-                startTime: (0, utils_2.nowIso)(new Date()),
+                startTime: (0, utils_1.nowIso)(new Date()),
                 remainingSec: Math.round(this.settings.pomodoroWorkMinutes * 60),
                 targetSec: Math.round(this.settings.pomodoroWorkMinutes * 60),
                 pomodoroPhase: 'work',
@@ -157,7 +207,7 @@ class TimerView extends obsidian_1.ItemView {
         this.resumeBtn.onclick = async () => {
             this.applyOptimisticState({
                 status: 'running',
-                startTime: (0, utils_2.nowIso)(new Date()),
+                startTime: (0, utils_1.nowIso)(new Date()),
             });
             await this.timerSvc.resume(new Date());
             this.refreshAll();
@@ -179,7 +229,7 @@ class TimerView extends obsidian_1.ItemView {
         };
         taskBtn.onclick = () => this.openSettings();
         logBtn.onclick = () => this.openLogView();
-        this.messageEl = contentEl.createDiv({ cls: 'ltfr-message' });
+        this.messageEl = container.createDiv({ cls: 'ltfr-message' });
         this.syncState();
         this.syncButtons();
         this.syncMessage();
@@ -210,22 +260,22 @@ class TimerView extends obsidian_1.ItemView {
             if (this.remainingEl && this.elapsedEl) {
                 if (this.currentState.mode === 'inverse-pomodoro') {
                     if (this.currentState.pomodoroPhase === 'work') {
-                        this.remainingEl.textContent = '';
-                        this.elapsedEl.textContent = `Phase: ${(0, utils_1.formatDuration)(elapsed)}`;
+                        this.remainingEl.textContent = (0, utils_1.formatDuration)(elapsed);
+                        this.elapsedEl.textContent = 'Count up';
                     }
                     else {
                         const remaining = this.currentState.remainingSec === null ? 0 : Math.max(0, this.currentState.remainingSec - Math.floor((Date.now() - new Date(this.currentState.startTime).getTime()) / 1000));
-                        this.remainingEl.textContent = `Remaining: ${(0, utils_1.formatDuration)(remaining)}`;
-                        this.elapsedEl.textContent = '';
+                        this.remainingEl.textContent = (0, utils_1.formatDuration)(remaining);
+                        this.elapsedEl.textContent = 'Break';
                     }
                 }
                 else if (this.currentState.remainingSec !== null) {
                     const remaining = Math.max(0, this.currentState.remainingSec - Math.floor((Date.now() - new Date(this.currentState.startTime).getTime()) / 1000));
-                    this.remainingEl.textContent = `Remaining: ${(0, utils_1.formatDuration)(remaining)}`;
-                    this.elapsedEl.textContent = '';
+                    this.remainingEl.textContent = (0, utils_1.formatDuration)(remaining);
+                    this.elapsedEl.textContent = 'Pomodoro';
                 }
                 else {
-                    this.remainingEl.textContent = '';
+                    this.remainingEl.textContent = '--:--';
                     this.elapsedEl.textContent = '';
                 }
             }
@@ -265,17 +315,17 @@ class TimerView extends obsidian_1.ItemView {
         if (this.remainingEl && this.elapsedEl) {
             if (state.mode === 'inverse-pomodoro') {
                 if (state.pomodoroPhase === 'work') {
-                    this.remainingEl.textContent = '';
-                    this.elapsedEl.textContent = `Phase: ${(0, utils_1.formatDuration)(state.elapsedSec)}`;
+                    this.remainingEl.textContent = (0, utils_1.formatDuration)(state.elapsedSec);
+                    this.elapsedEl.textContent = 'Count up';
                 }
                 else {
-                    this.remainingEl.textContent = state.remainingSec === null ? '' : `Remaining: ${(0, utils_1.formatDuration)(state.remainingSec)}`;
-                    this.elapsedEl.textContent = '';
+                    this.remainingEl.textContent = state.remainingSec === null ? '--:--' : (0, utils_1.formatDuration)(state.remainingSec);
+                    this.elapsedEl.textContent = 'Break';
                 }
             }
             else {
-                this.remainingEl.textContent = state.remainingSec === null ? '' : `Remaining: ${(0, utils_1.formatDuration)(state.remainingSec)}`;
-                this.elapsedEl.textContent = '';
+                this.remainingEl.textContent = state.remainingSec === null ? '--:--' : (0, utils_1.formatDuration)(state.remainingSec);
+                this.elapsedEl.textContent = state.mode === 'pomodoro' ? 'Pomodoro' : '';
             }
         }
         if (this.statusEl) {
@@ -284,12 +334,25 @@ class TimerView extends obsidian_1.ItemView {
                 state.status === 'paused'
                     ? `Paused${phase}`
                     : state.status === 'running' && state.mode === 'inverse-pomodoro' && state.pomodoroPhase === 'work'
-                        ? `Running${phase} [count up]`
+                        ? `Running${phase}`
                         : state.status === 'running'
                             ? `Running${phase}`
                             : state.status === 'completed'
                                 ? 'Completed'
                                 : 'Idle';
+            this.statusEl.className = 'ltfr-status-badge';
+            if (state.status === 'paused') {
+                this.statusEl.classList.add('ltfr-status-paused');
+            }
+            else if (state.status === 'running') {
+                this.statusEl.classList.add('ltfr-status-running');
+            }
+            else if (state.status === 'completed') {
+                this.statusEl.classList.add('ltfr-status-completed');
+            }
+            else {
+                this.statusEl.classList.add('ltfr-status-idle');
+            }
         }
     }
     syncButtons() {
@@ -353,12 +416,13 @@ class TimerView extends obsidian_1.ItemView {
 }
 exports.TimerView = TimerView;
 class LogView extends obsidian_1.ItemView {
-    constructor(leaf, querySvc, editSvc, exportSvc, settings, refreshAll) {
+    constructor(leaf, querySvc, editSvc, exportSvc, settings, getTasks, refreshAll) {
         super(leaf);
         this.querySvc = querySvc;
         this.editSvc = editSvc;
         this.exportSvc = exportSvc;
         this.settings = settings;
+        this.getTasks = getTasks;
         this.refreshAll = refreshAll;
         this.rangeType = 'today';
         this.searchText = '';
@@ -372,6 +436,8 @@ class LogView extends obsidian_1.ItemView {
         this.searchInputEl = null;
         this.listEl = null;
         this.exportBtnEl = null;
+        this.addLogBtnEl = null;
+        this.resizeObserver = null;
     }
     getViewType() {
         return exports.LOG_VIEW_TYPE;
@@ -384,12 +450,33 @@ class LogView extends obsidian_1.ItemView {
     }
     async onOpen() {
         await this.render();
+        this.resizeObserver = new ResizeObserver((entries) => {
+            for (const entry of entries) {
+                const width = entry.contentRect.width;
+                const height = entry.contentRect.height;
+                if (width === 0 || height === 0)
+                    continue;
+                const scale = Math.min(width / 300, height / 600);
+                const clampedScale = Math.max(0.6, Math.min(2.0, scale));
+                this.contentEl.style.setProperty('--ui-scale', String(clampedScale));
+            }
+        });
+        this.resizeObserver.observe(this.contentEl);
+    }
+    async onClose() {
+        if (this.resizeObserver) {
+            this.resizeObserver.disconnect();
+            this.resizeObserver = null;
+        }
+        await super.onClose();
     }
     async render() {
         const { contentEl } = this;
         contentEl.empty();
-        contentEl.createEl('h2', { text: 'Logs' });
-        const controls = contentEl.createDiv({ cls: 'ltfr-log-controls' });
+        const container = contentEl.createDiv({ cls: 'ltfr-log-container' });
+        container.createEl('h2', { text: 'Logs' });
+        // Controls Grid
+        const controls = container.createDiv({ cls: 'ltfr-log-controls-grid' });
         controls.createDiv({ text: 'Term' });
         this.rangeSelectEl = controls.createEl('select');
         for (const [value, label] of [
@@ -415,13 +502,14 @@ class LogView extends obsidian_1.ItemView {
             void this.refreshList();
         };
         controls.createDiv({ text: 'Range' });
-        this.fromInputEl = controls.createEl('input', { type: 'date' });
+        const rangeInputWrap = container.createDiv({ cls: 'ltfr-log-date-range-inputs' });
+        this.fromInputEl = rangeInputWrap.createEl('input', { type: 'date' });
         this.fromInputEl.value = this.rangeFrom ?? '';
         this.fromInputEl.onchange = () => {
             this.rangeFrom = this.fromInputEl?.value || null;
             void this.refreshList();
         };
-        this.toInputEl = controls.createEl('input', { type: 'date' });
+        this.toInputEl = rangeInputWrap.createEl('input', { type: 'date' });
         this.toInputEl.value = this.rangeTo ?? '';
         this.toInputEl.onchange = () => {
             this.rangeTo = this.toInputEl?.value || null;
@@ -442,11 +530,34 @@ class LogView extends obsidian_1.ItemView {
             this.searchText = this.searchInputEl?.value ?? '';
             void this.refreshList();
         };
-        this.exportBtnEl = contentEl.createEl('button', { text: 'Export' });
+        // Actions
+        const actions = container.createDiv({ cls: 'ltfr-actions-grid' });
+        this.exportBtnEl = actions.createEl('button');
+        (0, obsidian_1.setIcon)(this.exportBtnEl, 'download');
+        this.exportBtnEl.createSpan({ text: 'Export' });
         this.exportBtnEl.onclick = async () => {
             await this.exportSvc.exportWithRangeType(this.rangeType, new Date());
         };
-        this.listEl = contentEl.createDiv({ cls: 'ltfr-log-list' });
+        this.addLogBtnEl = actions.createEl('button', { cls: 'ltfr-btn-accent' });
+        (0, obsidian_1.setIcon)(this.addLogBtnEl, 'plus');
+        this.addLogBtnEl.createSpan({ text: 'Add log' });
+        this.addLogBtnEl.onclick = async () => {
+            const tasks = this.getTasks();
+            if (tasks.length === 0) {
+                new obsidian_1.Notice('No tasks available. Add a task first in settings.');
+                return;
+            }
+            const defaultTask = tasks[0];
+            if (!defaultTask) {
+                new obsidian_1.Notice('No tasks available. Add a task first in settings.');
+                return;
+            }
+            new log_edit_modal_1.LogEditModal(this.app, { durationSec: 0, memo: '', task: (0, utils_1.toTaskRef)(defaultTask) }, tasks, async (payload) => {
+                await this.editSvc.create(payload, new Date());
+                await this.render();
+            }, async () => undefined, { title: 'Add log', submitLabel: 'Add', allowDelete: false }).open();
+        };
+        this.listEl = container.createDiv({ cls: 'ltfr-log-list' });
         await this.refreshList();
     }
     async refreshList() {
@@ -469,20 +580,28 @@ class LogView extends obsidian_1.ItemView {
             return `${log.taskPath} ${log.memo}`.toLowerCase().includes(query);
         });
         const allLogs = await this.querySvc.getAllLogs();
+        const tasks = this.getTasks();
         for (const log of filteredLogs) {
-            const row = this.listEl.createDiv({ cls: 'ltfr-log-row' });
-            row.createDiv({ text: `${log.taskPath} / ${log.durationText}` });
-            row.createDiv({ text: log.memo || '' });
-            row.onclick = async () => {
+            const card = this.listEl.createDiv({ cls: 'ltfr-log-card' });
+            const header = card.createDiv({ cls: 'ltfr-log-card-header' });
+            header.createDiv({ text: log.taskPath, cls: 'ltfr-log-card-task' });
+            header.createDiv({ text: log.durationText, cls: 'ltfr-log-card-duration' });
+            if (log.memo) {
+                card.createDiv({ text: log.memo, cls: 'ltfr-log-card-memo' });
+            }
+            card.onclick = async () => {
                 const original = allLogs.find((item) => item.id === log.id);
                 if (!original) {
                     new obsidian_1.Notice('Log not found');
                     return;
                 }
-                new log_edit_modal_1.LogEditModal(this.app, { durationSec: original.durationSec, memo: original.memo, task: original.task }, async (payload) => {
+                new log_edit_modal_1.LogEditModal(this.app, { durationSec: original.durationSec, memo: original.memo, task: original.task }, tasks, async (payload) => {
                     await this.editSvc.updateDuration(original.id, payload.durationSec, new Date());
                     await this.editSvc.updateMemo(original.id, payload.memo, new Date());
                     await this.editSvc.updateTask(original.id, payload.task, new Date());
+                    await this.render();
+                }, async () => {
+                    await this.editSvc.delete(original.id);
                     await this.render();
                 }).open();
             };

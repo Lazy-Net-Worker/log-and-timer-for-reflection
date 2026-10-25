@@ -95,6 +95,7 @@ export interface LogRepository {
 	findById(id: string): Promise<LogEntry | null>;
 	save(log: LogEntry): Promise<void>;
 	update(log: LogEntry): Promise<void>;
+	delete(id: string): Promise<void>;
 }
 
 export interface TaskRepository {
@@ -131,6 +132,11 @@ export class PluginLogRepository implements LogRepository {
 
 	async update(log: LogEntry): Promise<void> {
 		await this.save(log);
+	}
+
+	async delete(id: string): Promise<void> {
+		const data = await this.repo.getAll();
+		await this.repo.save({ ...data, logs: data.logs.filter((log) => log.id !== id) });
 	}
 }
 

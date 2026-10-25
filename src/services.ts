@@ -327,6 +327,10 @@ export class TaskMasterApplicationService {
 export class LogEditApplicationService {
 	constructor(private readonly logRepo: LogRepository) {}
 
+	async create(input: { durationSec: number; memo: string; task: TaskRef }, now: Date): Promise<void> {
+		await this.logRepo.save(createLog(now, new Date(now.getTime() + Math.max(0, input.durationSec) * 1000), input.task, input.memo));
+	}
+
 	async updateDuration(logId: string, durationSec: number, now: Date): Promise<void> {
 		const log = await this.logRepo.findById(logId);
 		if (!log) throw new Error('Log not found');
@@ -346,6 +350,12 @@ export class LogEditApplicationService {
 		const log = await this.logRepo.findById(logId);
 		if (!log) throw new Error('Log not found');
 		await this.logRepo.update({ ...log, memo, updatedAt: nowIso(now) });
+	}
+
+	async delete(logId: string): Promise<void> {
+		const log = await this.logRepo.findById(logId);
+		if (!log) throw new Error('Log not found');
+		await this.logRepo.delete(logId);
 	}
 }
 

@@ -325,6 +325,9 @@ class LogEditApplicationService {
     constructor(logRepo) {
         this.logRepo = logRepo;
     }
+    async create(input, now) {
+        await this.logRepo.save(createLog(now, new Date(now.getTime() + Math.max(0, input.durationSec) * 1000), input.task, input.memo));
+    }
     async updateDuration(logId, durationSec, now) {
         const log = await this.logRepo.findById(logId);
         if (!log)
@@ -346,6 +349,12 @@ class LogEditApplicationService {
         if (!log)
             throw new Error('Log not found');
         await this.logRepo.update({ ...log, memo, updatedAt: (0, utils_1.nowIso)(now) });
+    }
+    async delete(logId) {
+        const log = await this.logRepo.findById(logId);
+        if (!log)
+            throw new Error('Log not found');
+        await this.logRepo.delete(logId);
     }
 }
 exports.LogEditApplicationService = LogEditApplicationService;

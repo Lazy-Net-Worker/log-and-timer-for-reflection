@@ -76,7 +76,7 @@ export default class ReflectionPlugin extends Plugin {
 			() => this.refreshViews(),
 			this.settings,
 		));
-		this.registerView(LOG_VIEW_TYPE, (leaf) => new LogView(leaf, this.querySvc, this.logEditSvc, this.exportSvc, this.settings, () => this.refreshViews()));
+		this.registerView(LOG_VIEW_TYPE, (leaf) => new LogView(leaf, this.querySvc, this.logEditSvc, this.exportSvc, this.settings, () => this.getTasks(), () => this.refreshViews()));
 
 		this.addRibbonIcon('timer', 'Open timer', () => void this.openTimerView());
 		this.addCommand({ id: 'open-timer-view', name: 'Open timer view', callback: () => void this.openTimerView() });

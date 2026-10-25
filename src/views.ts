@@ -1,8 +1,7 @@
-import { ItemView, Notice, WorkspaceLeaf } from 'obsidian';
+import { ItemView, Notice, WorkspaceLeaf, setIcon } from 'obsidian';
 import { ExportApplicationService, LogEditApplicationService, LogQueryApplicationService, TimerApplicationService } from './services';
 import { PluginSettings, TaskMaster, TimerStateDTO } from './types';
-import { formatDuration, taskPath } from './utils';
-import { nowIso } from './utils';
+import { formatDuration, nowIso, taskPath, toTaskRef } from './utils';
 import { LogEditModal } from './ui/log-edit-modal';
 import { ReflectionModal } from './ui/reflection-modal';
 
@@ -26,6 +25,7 @@ export class TimerView extends ItemView {
 	private tasksSignature = '';
 	private currentState: TimerStateDTO | null = null;
 	private rafHandle: number | null = null;
+	private resizeObserver: ResizeObserver | null = null;
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -57,10 +57,35 @@ export class TimerView extends ItemView {
 	async onOpen(): Promise<void> {
 		await this.render();
 		this.updateTicker();
+
+		this.resizeObserver = new ResizeObserver((entries) => {
+			for (const entry of entries) {
+				const width = entry.contentRect.width;
+				const height = entry.contentRect.height;
+				if (width === 0 || height === 0) continue;
+				const scale = Math.min(width / 300, height / 600);
+				const clampedScale = Math.max(0.6, Math.min(2.0, scale));
+				this.contentEl.style.setProperty('--ui-scale', String(clampedScale));
+
+				const actionsEl = this.contentEl.querySelector('.ltfr-actions-grid');
+				if (actionsEl) {
+					if (width < 280) {
+						actionsEl.classList.add('is-narrow');
+					} else {
+						actionsEl.classList.remove('is-narrow');
+					}
+				}
+			}
+		});
+		this.resizeObserver.observe(this.contentEl);
 	}
 
 	async onClose(): Promise<void> {
 		this.stopTicker();
+		if (this.resizeObserver) {
+			this.resizeObserver.disconnect();
+			this.resizeObserver = null;
+		}
 		await super.onClose();
 	}
 
@@ -85,13 +110,20 @@ export class TimerView extends ItemView {
 		this.tasksSignature = tasks.map((task) => task.id).join('|');
 		this.currentState = this.getTimerState();
 
-		contentEl.createEl('h2', { text: 'Timer' });
-		this.totalEl = contentEl.createDiv();
-		this.elapsedEl = contentEl.createDiv();
-		this.remainingEl = contentEl.createDiv();
-		this.statusEl = contentEl.createDiv();
+		const container = contentEl.createDiv({ cls: 'ltfr-timer-container' });
+		container.createEl('h2', { text: 'Timer' });
 
-		this.selectEl = contentEl.createEl('select');
+		// Display Card
+		const displayCard = container.createDiv({ cls: 'ltfr-timer-display-card' });
+		this.statusEl = displayCard.createDiv({ cls: 'ltfr-status-badge' });
+		this.remainingEl = displayCard.createDiv({ cls: 'ltfr-timer-large-time' });
+		this.elapsedEl = displayCard.createDiv({ cls: 'ltfr-timer-sub-time' });
+		this.totalEl = displayCard.createDiv({ cls: 'ltfr-timer-sub-time' });
+
+		// Task Selector
+		const selectorWrap = container.createDiv({ cls: 'ltfr-task-selector-wrap' });
+		selectorWrap.createEl('label', { text: 'Active Task' });
+		this.selectEl = selectorWrap.createEl('select');
 		this.selectEl.disabled = tasks.length === 0;
 		this.selectEl.createEl('option', { text: 'Select task', value: '' });
 		for (const task of tasks) {
@@ -104,16 +136,43 @@ export class TimerView extends ItemView {
 			this.syncMessage();
 		};
 
-		const actions = contentEl.createDiv({ cls: 'ltfr-actions' });
-		this.reversePomodoroBtn = actions.createEl('button', { text: 'Start reverse pomodoro' });
-		this.pomodoroBtn = actions.createEl('button', { text: 'Start pomodoro' });
-		this.breakBtn = actions.createEl('button', { text: 'Take break' });
-		this.resumeWorkBtn = actions.createEl('button', { text: 'Resume work' });
-		this.pauseBtn = actions.createEl('button', { text: 'Pause' });
-		this.resumeBtn = actions.createEl('button', { text: 'Resume' });
-		this.resetBtn = actions.createEl('button', { text: 'Reset' });
-		const taskBtn = actions.createEl('button', { text: 'Open task settings' });
-		const logBtn = actions.createEl('button', { text: 'Open logs' });
+		// Actions Grid
+		const actions = container.createDiv({ cls: 'ltfr-actions-grid' });
+		this.reversePomodoroBtn = actions.createEl('button', { cls: 'ltfr-btn-accent' });
+		setIcon(this.reversePomodoroBtn, 'play');
+		this.reversePomodoroBtn.createSpan({ text: 'Start reverse pomodoro' });
+
+		this.pomodoroBtn = actions.createEl('button');
+		setIcon(this.pomodoroBtn, 'timer');
+		this.pomodoroBtn.createSpan({ text: 'Start pomodoro' });
+
+		this.breakBtn = actions.createEl('button', { cls: 'ltfr-btn-accent' });
+		setIcon(this.breakBtn, 'coffee');
+		this.breakBtn.createSpan({ text: 'Take break' });
+
+		this.resumeWorkBtn = actions.createEl('button', { cls: 'ltfr-btn-accent' });
+		setIcon(this.resumeWorkBtn, 'play');
+		this.resumeWorkBtn.createSpan({ text: 'Resume work' });
+
+		this.pauseBtn = actions.createEl('button');
+		setIcon(this.pauseBtn, 'pause');
+		this.pauseBtn.createSpan({ text: 'Pause' });
+
+		this.resumeBtn = actions.createEl('button', { cls: 'ltfr-btn-accent' });
+		setIcon(this.resumeBtn, 'play');
+		this.resumeBtn.createSpan({ text: 'Resume' });
+
+		this.resetBtn = actions.createEl('button', { cls: 'mod-warning' });
+		setIcon(this.resetBtn, 'rotate-ccw');
+		this.resetBtn.createSpan({ text: 'Reset' });
+
+		const taskBtn = actions.createEl('button');
+		setIcon(taskBtn, 'settings');
+		taskBtn.createSpan({ text: 'Settings' });
+
+		const logBtn = actions.createEl('button');
+		setIcon(logBtn, 'list');
+		logBtn.createSpan({ text: 'Logs' });
 
 		this.reversePomodoroBtn.onclick = async () => {
 			const taskId = this.selectEl?.value ?? '';
@@ -195,7 +254,7 @@ export class TimerView extends ItemView {
 		taskBtn.onclick = () => this.openSettings();
 		logBtn.onclick = () => this.openLogView();
 
-		this.messageEl = contentEl.createDiv({ cls: 'ltfr-message' });
+		this.messageEl = container.createDiv({ cls: 'ltfr-message' });
 		this.syncState();
 		this.syncButtons();
 		this.syncMessage();
@@ -228,19 +287,19 @@ export class TimerView extends ItemView {
 			if (this.remainingEl && this.elapsedEl) {
 				if (this.currentState.mode === 'inverse-pomodoro') {
 					if (this.currentState.pomodoroPhase === 'work') {
-						this.remainingEl.textContent = '';
-						this.elapsedEl.textContent = `Phase: ${formatDuration(elapsed)}`
+						this.remainingEl.textContent = formatDuration(elapsed);
+						this.elapsedEl.textContent = 'Count up';
 					} else {
 						const remaining = this.currentState.remainingSec === null ? 0 : Math.max(0, this.currentState.remainingSec - Math.floor((Date.now() - new Date(this.currentState.startTime).getTime()) / 1000));
-						this.remainingEl.textContent = `Remaining: ${formatDuration(remaining)}`;
-						this.elapsedEl.textContent = '';
+						this.remainingEl.textContent = formatDuration(remaining);
+						this.elapsedEl.textContent = 'Break';
 					}
 				} else if (this.currentState.remainingSec !== null) {
 					const remaining = Math.max(0, this.currentState.remainingSec - Math.floor((Date.now() - new Date(this.currentState.startTime).getTime()) / 1000));
-					this.remainingEl.textContent = `Remaining: ${formatDuration(remaining)}`;
-					this.elapsedEl.textContent = '';
+					this.remainingEl.textContent = formatDuration(remaining);
+					this.elapsedEl.textContent = 'Pomodoro';
 				} else {
-					this.remainingEl.textContent = '';
+					this.remainingEl.textContent = '--:--';
 					this.elapsedEl.textContent = '';
 				}
 			}
@@ -282,15 +341,15 @@ export class TimerView extends ItemView {
 		if (this.remainingEl && this.elapsedEl) {
 			if (state.mode === 'inverse-pomodoro') {
 				if (state.pomodoroPhase === 'work') {
-					this.remainingEl.textContent = '';
-					this.elapsedEl.textContent = `Phase: ${formatDuration(state.elapsedSec)}`;
+					this.remainingEl.textContent = formatDuration(state.elapsedSec);
+					this.elapsedEl.textContent = 'Count up';
 				} else {
-					this.remainingEl.textContent = state.remainingSec === null ? '' : `Remaining: ${formatDuration(state.remainingSec)}`;
-					this.elapsedEl.textContent = '';
+					this.remainingEl.textContent = state.remainingSec === null ? '--:--' : formatDuration(state.remainingSec);
+					this.elapsedEl.textContent = 'Break';
 				}
 			} else {
-				this.remainingEl.textContent = state.remainingSec === null ? '' : `Remaining: ${formatDuration(state.remainingSec)}`;
-				this.elapsedEl.textContent = '';
+				this.remainingEl.textContent = state.remainingSec === null ? '--:--' : formatDuration(state.remainingSec);
+				this.elapsedEl.textContent = state.mode === 'pomodoro' ? 'Pomodoro' : '';
 			}
 		}
 		if (this.statusEl) {
@@ -299,12 +358,23 @@ export class TimerView extends ItemView {
 				state.status === 'paused'
 					? `Paused${phase}`
 					: state.status === 'running' && state.mode === 'inverse-pomodoro' && state.pomodoroPhase === 'work'
-						? `Running${phase} [count up]`
+						? `Running${phase}`
 						: state.status === 'running'
 							? `Running${phase}`
 							: state.status === 'completed'
 								? 'Completed'
 								: 'Idle';
+			
+			this.statusEl.className = 'ltfr-status-badge';
+			if (state.status === 'paused') {
+				this.statusEl.classList.add('ltfr-status-paused');
+			} else if (state.status === 'running') {
+				this.statusEl.classList.add('ltfr-status-running');
+			} else if (state.status === 'completed') {
+				this.statusEl.classList.add('ltfr-status-completed');
+			} else {
+				this.statusEl.classList.add('ltfr-status-idle');
+			}
 		}
 	}
 
@@ -372,12 +442,15 @@ export class LogView extends ItemView {
 	private searchInputEl: HTMLInputElement | null = null;
 	private listEl: HTMLElement | null = null;
 	private exportBtnEl: HTMLButtonElement | null = null;
+	private addLogBtnEl: HTMLButtonElement | null = null;
+	private resizeObserver: ResizeObserver | null = null;
 	constructor(
 		leaf: WorkspaceLeaf,
 		private readonly querySvc: LogQueryApplicationService,
 		private readonly editSvc: LogEditApplicationService,
 		private readonly exportSvc: ExportApplicationService,
 		private readonly settings: PluginSettings,
+		private readonly getTasks: () => TaskMaster[],
 		private readonly refreshAll: () => void,
 	) {
 		super(leaf);
@@ -397,14 +470,38 @@ export class LogView extends ItemView {
 
 	async onOpen(): Promise<void> {
 		await this.render();
+
+		this.resizeObserver = new ResizeObserver((entries) => {
+			for (const entry of entries) {
+				const width = entry.contentRect.width;
+				const height = entry.contentRect.height;
+				if (width === 0 || height === 0) continue;
+				const scale = Math.min(width / 300, height / 600);
+				const clampedScale = Math.max(0.6, Math.min(2.0, scale));
+				this.contentEl.style.setProperty('--ui-scale', String(clampedScale));
+			}
+		});
+		this.resizeObserver.observe(this.contentEl);
+	}
+
+	async onClose(): Promise<void> {
+		if (this.resizeObserver) {
+			this.resizeObserver.disconnect();
+			this.resizeObserver = null;
+		}
+		await super.onClose();
 	}
 
 	async render(): Promise<void> {
 		const { contentEl } = this;
 		contentEl.empty();
-		contentEl.createEl('h2', { text: 'Logs' });
+		
+		const container = contentEl.createDiv({ cls: 'ltfr-log-container' });
+		container.createEl('h2', { text: 'Logs' });
 
-		const controls = contentEl.createDiv({ cls: 'ltfr-log-controls' });
+		// Controls Grid
+		const controls = container.createDiv({ cls: 'ltfr-log-controls-grid' });
+		
 		controls.createDiv({ text: 'Term' });
 		this.rangeSelectEl = controls.createEl('select');
 		for (const [value, label] of [
@@ -431,14 +528,16 @@ export class LogView extends ItemView {
 		};
 
 		controls.createDiv({ text: 'Range' });
-		this.fromInputEl = controls.createEl('input', { type: 'date' });
+		const rangeInputWrap = container.createDiv({ cls: 'ltfr-log-date-range-inputs' });
+		
+		this.fromInputEl = rangeInputWrap.createEl('input', { type: 'date' });
 		this.fromInputEl.value = this.rangeFrom ?? '';
 		this.fromInputEl.onchange = () => {
 			this.rangeFrom = this.fromInputEl?.value || null;
 			void this.refreshList();
 		};
 
-		this.toInputEl = controls.createEl('input', { type: 'date' });
+		this.toInputEl = rangeInputWrap.createEl('input', { type: 'date' });
 		this.toInputEl.value = this.rangeTo ?? '';
 		this.toInputEl.onchange = () => {
 			this.rangeTo = this.toInputEl?.value || null;
@@ -462,12 +561,42 @@ export class LogView extends ItemView {
 			void this.refreshList();
 		};
 
-		this.exportBtnEl = contentEl.createEl('button', { text: 'Export' });
+		// Actions
+		const actions = container.createDiv({ cls: 'ltfr-actions-grid' });
+		this.exportBtnEl = actions.createEl('button');
+		setIcon(this.exportBtnEl, 'download');
+		this.exportBtnEl.createSpan({ text: 'Export' });
 		this.exportBtnEl.onclick = async () => {
 			await this.exportSvc.exportWithRangeType(this.rangeType, new Date());
 		};
+		this.addLogBtnEl = actions.createEl('button', { cls: 'ltfr-btn-accent' });
+		setIcon(this.addLogBtnEl, 'plus');
+		this.addLogBtnEl.createSpan({ text: 'Add log' });
+		this.addLogBtnEl.onclick = async () => {
+			const tasks = this.getTasks();
+			if (tasks.length === 0) {
+				new Notice('No tasks available. Add a task first in settings.');
+				return;
+			}
+			const defaultTask = tasks[0];
+			if (!defaultTask) {
+				new Notice('No tasks available. Add a task first in settings.');
+				return;
+			}
+			new LogEditModal(
+				this.app,
+				{ durationSec: 0, memo: '', task: toTaskRef(defaultTask) },
+				tasks,
+				async (payload) => {
+					await this.editSvc.create(payload, new Date());
+					await this.render();
+				},
+				async () => undefined,
+				{ title: 'Add log', submitLabel: 'Add', allowDelete: false },
+			).open();
+		};
 
-		this.listEl = contentEl.createDiv({ cls: 'ltfr-log-list' });
+		this.listEl = container.createDiv({ cls: 'ltfr-log-list' });
 		await this.refreshList();
 	}
 
@@ -489,23 +618,40 @@ export class LogView extends ItemView {
 			return `${log.taskPath} ${log.memo}`.toLowerCase().includes(query);
 		});
 		const allLogs = await this.querySvc.getAllLogs();
+		const tasks = this.getTasks();
 
 		for (const log of filteredLogs) {
-			const row = this.listEl.createDiv({ cls: 'ltfr-log-row' });
-			row.createDiv({ text: `${log.taskPath} / ${log.durationText}` });
-			row.createDiv({ text: log.memo || '' });
-			row.onclick = async () => {
+			const card = this.listEl.createDiv({ cls: 'ltfr-log-card' });
+			
+			const header = card.createDiv({ cls: 'ltfr-log-card-header' });
+			header.createDiv({ text: log.taskPath, cls: 'ltfr-log-card-task' });
+			header.createDiv({ text: log.durationText, cls: 'ltfr-log-card-duration' });
+			
+			if (log.memo) {
+				card.createDiv({ text: log.memo, cls: 'ltfr-log-card-memo' });
+			}
+			
+			card.onclick = async () => {
 				const original = allLogs.find((item) => item.id === log.id);
 				if (!original) {
 					new Notice('Log not found');
 					return;
 				}
-				new LogEditModal(this.app, { durationSec: original.durationSec, memo: original.memo, task: original.task }, async (payload) => {
-					await this.editSvc.updateDuration(original.id, payload.durationSec, new Date());
-					await this.editSvc.updateMemo(original.id, payload.memo, new Date());
-					await this.editSvc.updateTask(original.id, payload.task, new Date());
-					await this.render();
-				}).open();
+				new LogEditModal(
+					this.app,
+					{ durationSec: original.durationSec, memo: original.memo, task: original.task },
+					tasks,
+					async (payload) => {
+						await this.editSvc.updateDuration(original.id, payload.durationSec, new Date());
+						await this.editSvc.updateMemo(original.id, payload.memo, new Date());
+						await this.editSvc.updateTask(original.id, payload.task, new Date());
+						await this.render();
+					},
+					async () => {
+						await this.editSvc.delete(original.id);
+						await this.render();
+					},
+				).open();
 			};
 		}
 	}

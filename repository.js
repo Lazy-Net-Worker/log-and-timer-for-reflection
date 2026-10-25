@@ -108,6 +108,10 @@ class PluginLogRepository {
     async update(log) {
         await this.save(log);
     }
+    async delete(id) {
+        const data = await this.repo.getAll();
+        await this.repo.save({ ...data, logs: data.logs.filter((log) => log.id !== id) });
+    }
 }
 exports.PluginLogRepository = PluginLogRepository;
 class PluginTaskRepository {
