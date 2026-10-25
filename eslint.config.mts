@@ -6,8 +6,11 @@ export default defineConfig(
 	globalIgnores([
 		'node_modules',
 		'dist',
+		'*.js',
+		'ui',
 		'esbuild.config.mjs',
 		'version-bump.mjs',
+		'scripts',
 		'versions.json',
 		'main.js',
 		'package.json',
