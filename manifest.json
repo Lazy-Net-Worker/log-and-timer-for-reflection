@@ -1,7 +1,7 @@
 {
 	"id": "log-and-timer-for-reflection",
 	"name": "Log and timer for reflection",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"minAppVersion": "1.7.2",
 	"description": "Demonstrates some of the capabilities of the Obsidian API.",
 	"author": "Obsidian",
